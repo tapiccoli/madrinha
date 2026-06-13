@@ -98,6 +98,103 @@ def limpar(valor):
     return valor
 
 
+def limpar_campo_pedigree(valor):
+    """
+    Limpa qualquer campo vindo da planilha antes de mostrar no pedigree.
+    A saída deve ser somente texto simples, sem URL, sem quebra de linha
+    e sem sobras de HTML/link.
+    """
+    valor = limpar(valor)
+
+    if not valor:
+        return ""
+
+    # Remove URLs completas e pedaços de links.
+    valor = re.sub(r"https?://\S+", "", valor, flags=re.IGNORECASE)
+    valor = re.sub(r"www\.\S+", "", valor, flags=re.IGNORECASE)
+    valor = re.sub(r"cavalocrioulo\.org\.br\S*", "", valor, flags=re.IGNORECASE)
+    valor = re.sub(r"pesquisa/\S*", "", valor, flags=re.IGNORECASE)
+
+    # Remove quebras e espaços duplicados.
+    valor = valor.replace("\n", " ").replace("\r", " ")
+    valor = re.sub(r"\s+", " ", valor).strip()
+
+    return valor
+
+
+def extrair_sbb_limpo(valor):
+    """
+    Extrai apenas o primeiro código SBB válido.
+    Exemplos aceitos:
+    B089286, CHD40125, UP012475, AP003985, *000532.
+    """
+    valor = limpar_campo_pedigree(valor).upper()
+
+    if not valor:
+        return ""
+
+    encontrados = re.findall(r"(\*\d{3,}|[A-Z]{1,5}\d{3,})", valor)
+
+    if encontrados:
+        return encontrados[0].strip()
+
+    # Se não achou padrão, ainda retorna o campo limpo, desde que não pareça pelagem.
+    if len(valor.split()) <= 2:
+        return valor
+
+    return ""
+
+
+def limpar_nome_animal(valor):
+    """
+    Garante que o nome não venha grudado com SBB, pelagem, URL
+    ou dados de outro animal.
+    """
+    valor = limpar_campo_pedigree(valor)
+
+    if not valor:
+        return ""
+
+    # Remove tudo após URL, barra de pelagem ou SBB colado.
+    if " / " in valor:
+        valor = valor.split(" / ")[0].strip()
+
+    # Se veio no formato NOME - SBB, fica só com NOME.
+    if " - " in valor:
+        valor = valor.split(" - ")[0].strip()
+
+    # Se ainda houver código SBB grudado, corta antes dele.
+    valor = re.sub(r"\s+(\*\d{3,}|[A-Z]{1,5}\d{3,}).*$", "", valor).strip()
+
+    return valor
+
+
+def limpar_pelagem(valor):
+    """
+    Garante que a pelagem não carregue outro animal ou link.
+    """
+    valor = limpar_campo_pedigree(valor)
+
+    if not valor:
+        return ""
+
+    # Se veio com barra, pega só a parte depois da última barra.
+    if "/" in valor:
+        valor = valor.split("/")[-1].strip()
+
+    # Corta caso tenha vindo outro animal na sequência.
+    for sep in [" - ", " | ", " http", " www", "?"]:
+        if sep in valor:
+            valor = valor.split(sep)[0].strip()
+
+    # Evita pelagem gigante por erro de extração.
+    palavras = valor.split()
+    if len(palavras) > 4:
+        valor = " ".join(palavras[:4]).strip()
+
+    return valor
+
+
 def normalizar_nome(nome):
     nome = limpar(nome).upper()
     nome = unicodedata.normalize("NFKD", nome).encode("ASCII", "ignore").decode("utf-8")
@@ -112,9 +209,10 @@ def cor_por_nome(nome):
 
 def get_item(row, numero):
     prefixo = f"Item_{numero:02d}"
-    nome = limpar(row.get(f"{prefixo}_Nome", ""))
-    sbb = limpar(row.get(f"{prefixo}_SBB", ""))
-    pelagem = limpar(row.get(f"{prefixo}_Pelagem", ""))
+
+    nome = limpar_nome_animal(row.get(f"{prefixo}_Nome", ""))
+    sbb = extrair_sbb_limpo(row.get(f"{prefixo}_SBB", ""))
+    pelagem = limpar_pelagem(row.get(f"{prefixo}_Pelagem", ""))
 
     return {
         "item": numero,
@@ -125,19 +223,26 @@ def get_item(row, numero):
 
 
 def formatar_animal(animal):
-    nome = animal.get("nome", "")
-    sbb = animal.get("sbb", "")
-    pelagem = animal.get("pelagem", "")
+    """
+    Formato único das células do pedigree:
+    NOME - SBB / PELAGEM
+    """
+    nome = limpar_nome_animal(animal.get("nome", ""))
+    sbb = extrair_sbb_limpo(animal.get("sbb", ""))
+    pelagem = limpar_pelagem(animal.get("pelagem", ""))
 
-    partes = []
-    if nome:
-        partes.append(nome)
+    if not nome:
+        return ""
+
+    texto = nome
+
     if sbb:
-        partes.append(f"- {sbb}")
-    if pelagem:
-        partes.append(f"/ {pelagem}")
+        texto += f" - {sbb}"
 
-    return " ".join(partes).strip()
+    if pelagem:
+        texto += f" / {pelagem}"
+
+    return texto
 
 
 def nome_linha(row):
@@ -317,7 +422,7 @@ def montar_relatorio_html(soup, repetidos):
     tabela.append(cab)
 
     for sbb, ocorrs in sorted(repetidos.items(), key=lambda x: len(x[1]), reverse=True):
-        nome_exibicao = ocorrs[0]["animal"].get("nome", "")
+        nome_exibicao = limpar_nome_animal(ocorrs[0]["animal"].get("nome", ""))
         geracoes = [o["geracao"] for o in ocorrs]
         posicoes = [o["placeholder"] for o in ocorrs]
 
