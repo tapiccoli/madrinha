@@ -10,12 +10,12 @@ from bs4 import BeautifulSoup
 # ==============================
 # CONFIGURAÇÕES
 # ==============================
-ARQUIVO_PLANILHA_PADRAO = "extracao_bruta_pedigree1.xlsx"
+ARQUIVO_PLANILHA_PADRAO = "extracao_bruta_pedigree.xlsx"
 ARQUIVO_HTML_BASE = "modelopadraohipotetico.html"
 
 st.set_page_config(page_title="Cruzamento Hipotético", layout="wide")
 st.title("🐴 Sistema de Pedigree e Cruzamento Hipotético")
-st.caption("Novo modelo: preenchimento direto pelos placeholders Item_xx_TextoCompleto e Item_xx_TextoCompleto1")
+st.caption("Modelo por placeholders Item_xx_TextoCompleto e Item_xx_TextoCompleto1")
 
 # ==============================
 # GERAÇÕES POR ITEM
@@ -53,7 +53,7 @@ def limpar(valor):
     if pd.isna(valor):
         return ""
     valor = str(valor).strip()
-    if valor.lower() in ["nan", "none", "xxx", "não informado", "nao informado", "-"]:
+    if valor.lower() in ["nan", "none", "xxx", "xxxxx", "não informado", "nao informado", "-"]:
         return ""
     valor = valor.replace("\n", " ").replace("\r", " ")
     valor = re.sub(r"https?://\S+", "", valor)
@@ -64,7 +64,7 @@ def limpar(valor):
 
 def normalizar_sbb(sbb):
     sbb = limpar(sbb).upper().replace(" ", "")
-    if sbb in ["", "XXX", "-", "NÃOINFORMADO", "NAOINFORMADO", "NAN", "NONE"]:
+    if sbb in ["", "XXX", "XXXXX", "-", "NÃOINFORMADO", "NAOINFORMADO", "NAN", "NONE"]:
         return ""
     return sbb
 
@@ -76,7 +76,6 @@ def cor_por_sbb(sbb):
 
 def extrair_sbb_do_texto(texto):
     texto = limpar(texto)
-    # SBBs típicos: B123456, *000532, CHD40125, AD006341 etc.
     m = re.search(r"(\*[0-9]{3,}|[A-Z]{1,4}[0-9]{3,})", texto.upper())
     return m.group(1) if m else ""
 
@@ -86,7 +85,6 @@ def extrair_nome_do_texto(texto, sbb=""):
     if not texto:
         return ""
 
-    # Remove pedaços administrativos do animal principal.
     texto = re.sub(r"\s+-\s*RP:.*$", "", texto, flags=re.IGNORECASE)
     texto = re.sub(r"\s+RP:.*$", "", texto, flags=re.IGNORECASE)
     texto = re.sub(r"\s+Nascimento:.*$", "", texto, flags=re.IGNORECASE)
@@ -94,11 +92,9 @@ def extrair_nome_do_texto(texto, sbb=""):
     texto = re.sub(r"\s+Pelagem:.*$", "", texto, flags=re.IGNORECASE)
 
     if sbb:
-        # Nome antes de "- SBB" ou antes de " SBB".
         texto = re.sub(rf"\s*-\s*{re.escape(sbb)}.*$", "", texto, flags=re.IGNORECASE)
         texto = re.sub(rf"\s+{re.escape(sbb)}.*$", "", texto, flags=re.IGNORECASE)
 
-    # Se ainda sobrou barra, considera apenas o primeiro animal.
     if " / " in texto:
         texto = texto.split(" / ")[0].strip()
 
@@ -114,11 +110,8 @@ def extrair_pelagem_do_texto(texto):
     if m:
         return limpar(m.group(1))
 
-    # Em padrão NOME - SBB / PELAGEM, pega somente o trecho após a última barra.
-    # Evita aceitar nomes de outro animal como pelagem quando vier "SBB / OUTRO NOME".
     if " / " in texto:
         cand = limpar(texto.split(" / ")[-1])
-        # Pelagens normalmente não têm código SBB e não têm nomes típicos com prefixos/cabanhas.
         if not extrair_sbb_do_texto(cand) and len(cand.split()) <= 5:
             return cand
 
@@ -126,7 +119,6 @@ def extrair_pelagem_do_texto(texto):
 
 
 def texto_animal(row, numero_item: int, sufixo: str = ""):
-    """Monta texto padronizado usando Nome/SBB/Pelagem e TextoCompleto como apoio."""
     prefixo = f"Item_{numero_item:02d}"
 
     col_nome = f"{prefixo}_Nome{sufixo}"
@@ -134,7 +126,6 @@ def texto_animal(row, numero_item: int, sufixo: str = ""):
     col_pelagem = f"{prefixo}_Pelagem{sufixo}"
     col_texto = f"{prefixo}_TextoCompleto{sufixo}"
 
-    # Algumas planilhas antigas tinham Item_83_TextoCompleto sem sufixo na aba animal2.
     texto_completo = limpar(row.get(col_texto, ""))
     if not texto_completo and sufixo == "1":
         texto_completo = limpar(row.get(f"{prefixo}_TextoCompleto", ""))
@@ -145,14 +136,11 @@ def texto_animal(row, numero_item: int, sufixo: str = ""):
 
     if not sbb:
         sbb = extrair_sbb_do_texto(texto_completo)
-
     if not nome:
         nome = extrair_nome_do_texto(texto_completo, sbb)
-
     if not pelagem:
         pelagem = extrair_pelagem_do_texto(texto_completo)
 
-    # Segurança contra nomes que vieram grudados com código/pelagem.
     if sbb and sbb.upper() in nome.upper():
         nome = extrair_nome_do_texto(nome, sbb)
 
@@ -174,7 +162,12 @@ def nome_para_select(row, sufixo=""):
         return f"{nome} | {sbb}"
     if texto:
         return texto
-    sbb_pesq = limpar(row.get(f"SBB Pesquisado{sufixo}", ""))
+
+    col = f"SBB Pesquisado{sufixo}"
+    sbb_pesq = limpar(row.get(col, ""))
+    if not sbb_pesq and sufixo == "1":
+        sbb_pesq = limpar(row.get("SBB Pesquisado", ""))
+
     return sbb_pesq or "Animal sem identificação"
 
 
@@ -187,7 +180,11 @@ def localizar_por_select(df, escolha, sufixo=""):
             if not achou.empty:
                 return achou.iloc[0]
 
-    # fallback pelo texto do select
+        if sufixo == "1" and "SBB Pesquisado" in df.columns:
+            achou = df[df["SBB Pesquisado"].astype(str).str.strip().str.upper() == sbb.upper()]
+            if not achou.empty:
+                return achou.iloc[0]
+
     for _, row in df.iterrows():
         if nome_para_select(row, sufixo) == escolha:
             return row
@@ -199,27 +196,59 @@ def localizar_por_select(df, escolha, sufixo=""):
 PLACEHOLDER_RE = re.compile(r"^Item_(\d{2,3})_TextoCompleto(1?)$")
 
 
-def coletar_placeholders_do_html(soup):
+def remover_bloco_animal2(soup):
+    """Remove a segunda árvore do HTML para o relatório individual."""
+    inicio = None
+    for td in soup.find_all("td"):
+        if td.get_text(" ", strip=True) == "Item_19_TextoCompleto1":
+            inicio = td.find_parent("tr")
+            break
+
+    if not inicio:
+        return
+
+    tr = inicio
+    while tr:
+        proximo = tr.find_next_sibling("tr")
+        tr.decompose()
+        tr = proximo
+
+
+def coletar_placeholders_do_html(soup, modo="cruzamento"):
     placeholders = []
     for td in soup.find_all("td"):
         texto = td.get_text(" ", strip=True)
-        if PLACEHOLDER_RE.match(texto):
-            placeholders.append(texto)
+        m = PLACEHOLDER_RE.match(texto)
+        if not m:
+            continue
+
+        sufixo = m.group(2)
+        if modo == "individual" and sufixo == "1":
+            continue
+
+        placeholders.append(texto)
+
     return placeholders
 
 
-def montar_mapa_valores(soup, row1, row2):
+def montar_mapa_valores(soup, row1, row2=None, modo="cruzamento"):
     mapa = {}
     ocorrencias = defaultdict(list)
 
-    for placeholder in coletar_placeholders_do_html(soup):
+    for placeholder in coletar_placeholders_do_html(soup, modo=modo):
         m = PLACEHOLDER_RE.match(placeholder)
         if not m:
             continue
 
         numero = int(m.group(1))
-        sufixo = m.group(2)  # "" = animal1; "1" = animal2
-        row = row2 if sufixo == "1" else row1
+        sufixo = m.group(2)
+
+        if sufixo == "1":
+            if row2 is None:
+                continue
+            row = row2
+        else:
+            row = row1
 
         texto_final, sbb_norm, nome, pelagem = texto_animal(row, numero, sufixo)
         mapa[placeholder] = {
@@ -246,7 +275,10 @@ def montar_mapa_valores(soup, row1, row2):
 def aplicar_valores_no_html(soup, mapa, repetidos):
     for td in soup.find_all("td"):
         texto_original = td.get_text(" ", strip=True)
+
         if texto_original not in mapa:
+            if PLACEHOLDER_RE.match(texto_original):
+                td.clear()
             continue
 
         info = mapa[texto_original]
@@ -259,7 +291,7 @@ def aplicar_valores_no_html(soup, mapa, repetidos):
         )
 
         strong = soup.new_tag("strong")
-        strong.string = info["texto"]
+        strong.string = info["texto"] if info["texto"] else ""
         span.append(strong)
         td.append(span)
 
@@ -297,17 +329,22 @@ def aplicar_valores_no_html(soup, mapa, repetidos):
     .relatorio-duplicacoes th {
         background: #efefef;
     }
+    @media print {
+        .relatorio-duplicacoes {
+            page-break-before: avoid;
+        }
+    }
     """
     if soup.head:
         soup.head.append(style_tag)
 
 
-def montar_relatorio_html(soup, repetidos):
+def montar_relatorio_html(soup, repetidos, titulo="Relatório de animais repetidos no pedigree"):
     div = soup.new_tag("div")
     div["class"] = "relatorio-duplicacoes"
 
     h3 = soup.new_tag("h3")
-    h3.string = "Relatório de animais repetidos no pedigree"
+    h3.string = titulo
     div.append(h3)
 
     if not repetidos:
@@ -319,9 +356,9 @@ def montar_relatorio_html(soup, repetidos):
 
     tabela = soup.new_tag("table")
     cab = soup.new_tag("tr")
-    for titulo in ["Animal", "SBB", "Quantidade", "Gerações"]:
+    for titulo_coluna in ["Animal", "SBB", "Quantidade", "Gerações"]:
         th = soup.new_tag("th")
-        th.string = titulo
+        th.string = titulo_coluna
         cab.append(th)
     tabela.append(cab)
 
@@ -355,13 +392,26 @@ def montar_relatorio_html(soup, repetidos):
     soup.body.append(div)
 
 
-def gerar_html(row1, row2, caminho_html_base):
+def gerar_html_cruzamento(row1, row2, caminho_html_base):
     with open(caminho_html_base, "r", encoding="utf-8", errors="ignore") as f:
         soup = BeautifulSoup(f, "html.parser")
 
-    mapa, repetidos = montar_mapa_valores(soup, row1, row2)
+    mapa, repetidos = montar_mapa_valores(soup, row1, row2, modo="cruzamento")
     aplicar_valores_no_html(soup, mapa, repetidos)
-    montar_relatorio_html(soup, repetidos)
+    montar_relatorio_html(soup, repetidos, "Relatório de animais repetidos no cruzamento hipotético")
+
+    return str(soup), repetidos
+
+
+def gerar_html_individual(row1, caminho_html_base):
+    with open(caminho_html_base, "r", encoding="utf-8", errors="ignore") as f:
+        soup = BeautifulSoup(f, "html.parser")
+
+    remover_bloco_animal2(soup)
+
+    mapa, repetidos = montar_mapa_valores(soup, row1, None, modo="individual")
+    aplicar_valores_no_html(soup, mapa, repetidos)
+    montar_relatorio_html(soup, repetidos, "Relatório individual de animais repetidos no pedigree")
 
     return str(soup), repetidos
 
@@ -369,10 +419,10 @@ def gerar_html(row1, row2, caminho_html_base):
 # INTERFACE
 # ==============================
 
-st.markdown("Carregue a planilha e selecione o primeiro animal na aba **animal1** e o segundo na aba **animal2**.")
+st.markdown("Carregue a planilha e o modelo HTML, ou deixe os arquivos na mesma pasta do app.")
 
 arquivo_planilha = st.file_uploader("Planilha padrão (.xlsx)", type=["xlsx"])
-arquivo_html = st.file_uploader("Modelo HTML espelhado", type=["html", "htm"])
+arquivo_html = st.file_uploader("Modelo HTML", type=["html", "htm"])
 
 if arquivo_planilha is not None:
     excel = pd.ExcelFile(arquivo_planilha)
@@ -382,12 +432,15 @@ else:
         st.stop()
     excel = pd.ExcelFile(ARQUIVO_PLANILHA_PADRAO)
 
-if "animal1" not in excel.sheet_names or "animal2" not in excel.sheet_names:
-    st.error("A planilha precisa conter as abas 'animal1' e 'animal2'.")
+if "animal1" not in excel.sheet_names:
+    st.error("A planilha precisa conter pelo menos a aba 'animal1'.")
     st.stop()
 
 animal1_df = pd.read_excel(excel, sheet_name="animal1", dtype=str)
-animal2_df = pd.read_excel(excel, sheet_name="animal2", dtype=str)
+
+animal2_df = None
+if "animal2" in excel.sheet_names:
+    animal2_df = pd.read_excel(excel, sheet_name="animal2", dtype=str)
 
 if arquivo_html is not None:
     caminho_html_temp = "_modelo_upload_temp.html"
@@ -400,29 +453,66 @@ else:
         st.stop()
     caminho_html_base = ARQUIVO_HTML_BASE
 
-opcoes1 = [nome_para_select(row, "") for _, row in animal1_df.iterrows()]
-opcoes2 = [nome_para_select(row, "1") for _, row in animal2_df.iterrows()]
+modo = st.sidebar.radio(
+    "Tipo de relatório",
+    ["Relatório individual", "Cruzamento hipotético"]
+)
 
-col1, col2 = st.columns(2)
-escolha1 = col1.selectbox("Animal 1", opcoes1)
-escolha2 = col2.selectbox("Animal 2", opcoes2)
+if modo == "Relatório individual":
+    st.subheader("Relatório individual")
 
-row1 = localizar_por_select(animal1_df, escolha1, "")
-row2 = localizar_por_select(animal2_df, escolha2, "1")
+    opcoes1 = [nome_para_select(row, "") for _, row in animal1_df.iterrows()]
+    escolha1 = st.selectbox("Selecione o animal", opcoes1)
 
-if st.button("Gerar cruzamento hipotético", type="primary"):
-    if row1 is None or row2 is None:
-        st.error("Não consegui localizar um dos animais selecionados.")
+    row1 = localizar_por_select(animal1_df, escolha1, "")
+
+    if st.button("Gerar relatório individual", type="primary"):
+        if row1 is None:
+            st.error("Não consegui localizar o animal selecionado.")
+            st.stop()
+
+        html, repetidos = gerar_html_individual(row1, caminho_html_base)
+
+        st.components.v1.html(html, height=800, scrolling=True)
+        st.success(f"Repetições encontradas: {len(repetidos)}")
+
+        st.download_button(
+            "Baixar HTML do relatório individual",
+            data=html,
+            file_name="relatorio_individual.html",
+            mime="text/html"
+        )
+
+else:
+    st.subheader("Cruzamento hipotético")
+
+    if animal2_df is None:
+        st.error("Para cruzamento hipotético, a planilha precisa conter a aba 'animal2'.")
         st.stop()
 
-    html, repetidos = gerar_html(row1, row2, caminho_html_base)
+    opcoes1 = [nome_para_select(row, "") for _, row in animal1_df.iterrows()]
+    opcoes2 = [nome_para_select(row, "1") for _, row in animal2_df.iterrows()]
 
-    st.components.v1.html(html, height=800, scrolling=True)
-    st.success(f"Repetições encontradas: {len(repetidos)}")
+    col1, col2 = st.columns(2)
+    escolha1 = col1.selectbox("Animal 1", opcoes1)
+    escolha2 = col2.selectbox("Animal 2", opcoes2)
 
-    st.download_button(
-        "Baixar HTML do cruzamento",
-        data=html,
-        file_name="cruzamento_hipotetico.html",
-        mime="text/html"
-    )
+    row1 = localizar_por_select(animal1_df, escolha1, "")
+    row2 = localizar_por_select(animal2_df, escolha2, "1")
+
+    if st.button("Gerar cruzamento hipotético", type="primary"):
+        if row1 is None or row2 is None:
+            st.error("Não consegui localizar um dos animais selecionados.")
+            st.stop()
+
+        html, repetidos = gerar_html_cruzamento(row1, row2, caminho_html_base)
+
+        st.components.v1.html(html, height=800, scrolling=True)
+        st.success(f"Repetições encontradas: {len(repetidos)}")
+
+        st.download_button(
+            "Baixar HTML do cruzamento",
+            data=html,
+            file_name="cruzamento_hipotetico.html",
+            mime="text/html"
+        )
