@@ -429,11 +429,11 @@ def gerar_pdf(html):
     css_pdf = CSS(string="""
         @page {
             size: A4 landscape;
-            margin: 6mm;
+            margin: 0mm;
         }
 
         body {
-            zoom: 0.62;
+            zoom: 0.48;
         }
 
         table {
