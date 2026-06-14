@@ -113,6 +113,9 @@ PELAGENS_CONHECIDAS = {
     "COLORADA REQUEIMADA", "TORDILHA VINAGRE", "ALAZÃ BRAGADA",
     "GATEADA ROSILHA TAPADA", "ROSILHA COLORADA TAPADA",
     "ZAINA COLORADA", "PICAÇA", "PICAÇA NEGRA", "PICAÇA COLORADA",
+    "ZAINA NEGRA", "BAIA BRANCA", "GATEADA ESCURA", "GATEADA RUIVA",
+    "TORDILHA BRAGADA", "TORDILHA VINAGRE BRAGADA", "TOSTADA REQUEIMADA",
+    "TOSTADA REQUEIMADA BRAGADA", "MOURA TAPADA", "ROSILHA TAPADA",
 }
 
 REGISTRO_RE = re.compile(r"(\*\d{4,6}|[A-Z]{1,4}\d{4,6})", re.IGNORECASE)
@@ -198,7 +201,8 @@ def extrair_animal_de_texto(texto):
     if not nome and partes_antes:
         nome = partes_antes[-1]
 
-    # Pelagem é apenas o primeiro conteúdo depois da primeira barra.
+    # Pelagem é apenas o primeiro conteúdo real depois da primeira barra.
+    # Se depois da barra vier nome de outro animal, não usa.
     pelagem = ""
     if "/" in depois:
         pedacos = [p.strip(" -/") for p in depois.split("/")]
@@ -207,13 +211,13 @@ def extrair_animal_de_texto(texto):
                 continue
             if URL_RE.search(pedaco):
                 continue
-            # Se já aparece outro SBB ou outro animal, não usar como pelagem.
             if REGISTRO_RE.search(pedaco):
                 continue
             if " - " in pedaco:
                 continue
-            pelagem = pedaco
-            break
+            if parece_pelagem(pedaco):
+                pelagem = pedaco
+                break
     else:
         # Casos raros: "NOME - SBB PELAGEM". Só usa se parecer pelagem conhecida.
         resto = depois.strip(" -/")
@@ -221,7 +225,6 @@ def extrair_animal_de_texto(texto):
             pelagem = resto
 
     if pelagem and not parece_pelagem(pelagem):
-        # Evita jogar nome de outro animal como pelagem.
         pelagem = ""
 
     return {
@@ -232,6 +235,12 @@ def extrair_animal_de_texto(texto):
 
 
 def limpar_pelagem(valor):
+    """
+    Mantém somente pelagens reais.
+    Isso evita que a última coluna use o nome do próximo animal como se fosse pelagem.
+    Exemplo ruim que passa a ser bloqueado:
+      TREN TREN ARREBOL - *000413 / ACULEO NUTRIA II
+    """
     valor = limpar_campo(valor)
     if not valor:
         return ""
@@ -241,8 +250,16 @@ def limpar_pelagem(valor):
         return ""
     if " - " in valor:
         return ""
+    if "/" in valor:
+        valor = valor.split("/")[0].strip()
     if valor.upper() in ["XXX", "NÃO INFORMADO", "NAO INFORMADO"]:
         return ""
+
+    # Regra principal: só aceita se parecer pelagem conhecida.
+    # Nomes de animais como LICORERA, MAPOLA, ACULEO NUTRIA II, BT RESTINGA etc. são descartados.
+    if not parece_pelagem(valor):
+        return ""
+
     return valor.strip(" -/")
 
 
