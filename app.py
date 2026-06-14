@@ -13,6 +13,14 @@ from bs4 import BeautifulSoup
 ARQUIVO_PLANILHA_PADRAO = "extracao_bruta_pedigree.xlsx"
 ARQUIVO_HTML_BASE = "modelopadraohipotetico.html"
 
+if not os.path.exists(ARQUIVO_HTML_BASE):
+    st.error(
+        f"Arquivo {ARQUIVO_HTML_BASE} não encontrado."
+    )
+    st.stop()
+
+caminho_html_base = ARQUIVO_HTML_BASE
+
 st.set_page_config(page_title="Cruzamento Hipotético", layout="wide")
 st.title("🐴 Sistema de Pedigree e Cruzamento Hipotético")
 st.caption("Modelo por placeholders Item_xx_TextoCompleto e Item_xx_TextoCompleto1")
@@ -419,10 +427,19 @@ def gerar_html_individual(row1, caminho_html_base):
 # INTERFACE
 # ==============================
 
-st.markdown("Carregue a planilha e o modelo HTML, ou deixe os arquivos na mesma pasta do app.")
+st.markdown(
+    """
+    ### Instruções
+
+    1. Carregue a planilha de pedigree.
+    2. Escolha os animais.
+    3. Gere o relatório individual ou o cruzamento hipotético.
+
+    O modelo genealógico utilizado é o padrão do sistema.
+    """
+)
 
 arquivo_planilha = st.file_uploader("Planilha padrão (.xlsx)", type=["xlsx"])
-arquivo_html = st.file_uploader("Modelo HTML", type=["html", "htm"])
 
 if arquivo_planilha is not None:
     excel = pd.ExcelFile(arquivo_planilha)
@@ -442,16 +459,11 @@ animal2_df = None
 if "animal2" in excel.sheet_names:
     animal2_df = pd.read_excel(excel, sheet_name="animal2", dtype=str)
 
-if arquivo_html is not None:
-    caminho_html_temp = "_modelo_upload_temp.html"
-    with open(caminho_html_temp, "wb") as f:
-        f.write(arquivo_html.getbuffer())
-    caminho_html_base = caminho_html_temp
-else:
-    if not os.path.exists(ARQUIVO_HTML_BASE):
-        st.warning(f"Carregue o HTML ou coloque '{ARQUIVO_HTML_BASE}' na pasta do app.")
-        st.stop()
-    caminho_html_base = ARQUIVO_HTML_BASE
+if not os.path.exists(ARQUIVO_HTML_BASE):
+    st.error(
+        f"Arquivo {ARQUIVO_HTML_BASE} não encontrado."
+    )
+    st.stop()
 
 modo = st.sidebar.radio(
     "Tipo de relatório",
