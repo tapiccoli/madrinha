@@ -427,18 +427,6 @@ def gerar_html_individual(row1, caminho_html_base):
 # INTERFACE
 # ==============================
 
-st.markdown(
-    """
-    ### Instruções
-
-    1. Carregue a planilha de pedigree.
-    2. Escolha os animais.
-    3. Gere o relatório individual ou o cruzamento hipotético.
-
-    O modelo genealógico utilizado é o padrão do sistema.
-    """
-)
-
 arquivo_planilha = st.file_uploader("Planilha padrão (.xlsx)", type=["xlsx"])
 
 if arquivo_planilha is not None:
