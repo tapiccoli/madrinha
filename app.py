@@ -4,7 +4,7 @@ import hashlib
 from collections import defaultdict
 
 try:
-    from weasyprint import HTML
+    from weasyprint import HTML, CSS
     WEASYPRINT_OK = True
     WEASYPRINT_ERRO = ""
 except Exception as e:
@@ -425,18 +425,39 @@ def gerar_html_individual(row1, caminho_html_base):
     return str(soup), repetidos
 
 
-def gerar_pdf_do_html(html: str) -> bytes:
-    """Gera PDF usando exatamente o HTML que o sistema já montou."""
-    if not WEASYPRINT_OK or HTML is None:
-        raise RuntimeError(
-            "WeasyPrint não está instalado ou não carregou corretamente. "
-            f"Detalhe: {WEASYPRINT_ERRO}"
-        )
+def gerar_pdf(html):
+    css_pdf = CSS(string="""
+        @page {
+            size: A4 landscape;
+            margin: 6mm;
+        }
 
-    return HTML(
-        string=html,
-        base_url=os.getcwd()
-    ).write_pdf()
+        body {
+            zoom: 0.62;
+        }
+
+        table {
+            width: 100% !important;
+            table-layout: fixed !important;
+            page-break-inside: avoid;
+        }
+
+        td {
+            font-size: 6px !important;
+            line-height: 1.05em !important;
+            padding: 1px !important;
+            overflow-wrap: anywhere !important;
+            word-break: break-word !important;
+            white-space: normal !important;
+        }
+
+        .relatorio-duplicacoes {
+            page-break-before: always;
+            zoom: 1.2;
+        }
+    """)
+
+    return HTML(string=html).write_pdf(stylesheets=[css_pdf])
 
 # ==============================
 # INTERFACE
@@ -507,7 +528,7 @@ if modo == "Relatório individual":
         )
 
         try:
-            pdf = gerar_pdf_do_html(html)
+            pdf = gerar_pdf(html)
             st.download_button(
                 "Baixar PDF do relatório individual",
                 data=pdf,
@@ -555,7 +576,7 @@ else:
         )
 
         try:
-            pdf = gerar_pdf_do_html(html)
+            pdf = gerar_pdf(html)
             st.download_button(
                 "Baixar PDF do cruzamento",
                 data=pdf,
