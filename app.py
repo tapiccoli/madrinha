@@ -90,6 +90,7 @@ BLOCOS_EXTRAS = [
 # ==============================
 
 def limpar(valor):
+    """Limpeza simples para campos vazios."""
     if pd.isna(valor):
         return ""
     valor = str(valor).strip()
@@ -98,36 +99,151 @@ def limpar(valor):
     return valor
 
 
-def limpar_campo_pedigree(valor):
-    """Limpa URLs, quebras de linha e textos inválidos."""
-    if pd.isna(valor):
+# Pelagens comuns para não confundir pelagem com nome de animal
+PELAGENS_CONHECIDAS = {
+    "ALAZA", "ALAZÃ", "ALAZAO", "ALAZÃO",
+    "BAIA", "BAIO", "BRAGADA", "COLORADA", "COLORADO",
+    "DOURADILHA", "GATEADA", "LOBUNA", "MOURA", "PICAÇA", "PICACA",
+    "PRETA", "PRETO", "ROSILHA", "RUANA", "TOBIANA", "TOSTADA",
+    "TORDILHA", "ZAINA",
+    "TORDILHA TAPADA", "TORDILHA LOBUNA", "TORDILHA NEGRA",
+    "GATEADA ROSILHA", "GATEADA BRAGADA", "GATEADA RUIVA BRAGADA",
+    "ROSILHA MOURA", "ROSILHA COLORADA", "ROSILHA MOURA TAPADA",
+    "TOSTADA ESCURA", "TOSTADA ALAZÃ", "TOSTADA ALAZA",
+    "COLORADA REQUEIMADA", "TORDILHA VINAGRE", "ALAZÃ BRAGADA",
+    "GATEADA ROSILHA TAPADA", "ROSILHA COLORADA TAPADA",
+    "ZAINA COLORADA", "PICAÇA", "PICAÇA NEGRA", "PICAÇA COLORADA",
+}
+
+REGISTRO_RE = re.compile(r"(\*\d{4,6}|[A-Z]{1,4}\d{4,6})", re.IGNORECASE)
+URL_RE = re.compile(r"https?://\S+|www\.\S+", re.IGNORECASE)
+
+
+def limpar_campo(valor):
+    """Remove URL, quebras e lixo básico sem tentar interpretar o conteúdo."""
+    valor = limpar(valor)
+    if not valor:
         return ""
-
-    valor = str(valor).strip()
-
-    if valor.lower() in ["nan", "none", "xxx", "não informado", "nao informado", "-"]:
-        return ""
-
-    # Remove URLs completas que às vezes vêm da página da ABCCC
-    valor = re.sub(r"https?://\S+", "", valor)
-    valor = re.sub(r"www\.\S+", "", valor)
-
-    # Remove parâmetros soltos de URL, caso tenham vindo quebrados
-    valor = re.sub(r"pesquisa/\S+", "", valor, flags=re.IGNORECASE)
-    valor = re.sub(r"sbb_busca=\S+", "", valor, flags=re.IGNORECASE)
-    valor = re.sub(r"token=\S+", "", valor, flags=re.IGNORECASE)
-
-    valor = valor.replace("\n", " ").replace("\r", " ").replace("\t", " ")
+    valor = URL_RE.sub("", valor)
+    valor = valor.replace("\n", " ").replace("\r", " ").replace("\xa0", " ")
     valor = re.sub(r"\s+", " ", valor).strip()
-
+    valor = valor.strip(" -/")
     return valor
 
 
 def normalizar_nome(nome):
-    nome = limpar(nome).upper()
+    nome = limpar_campo(nome).upper()
     nome = unicodedata.normalize("NFKD", nome).encode("ASCII", "ignore").decode("utf-8")
     nome = re.sub(r"\s+", " ", nome).strip()
     return nome
+
+
+def parece_pelagem(texto):
+    txt = normalizar_nome(texto)
+    if not txt:
+        return False
+    if txt in {normalizar_nome(p) for p in PELAGENS_CONHECIDAS}:
+        return True
+    # Quando o campo começa com uma pelagem e depois vem outro animal, ex.: "Tordilha Tapada - TREN TREN..."
+    for pel in PELAGENS_CONHECIDAS:
+        pel_norm = normalizar_nome(pel)
+        if txt == pel_norm or txt.startswith(pel_norm + " -"):
+            return True
+    return False
+
+
+def extrair_sbb(texto):
+    texto = limpar_campo(texto).upper()
+    if not texto:
+        return ""
+    m = REGISTRO_RE.search(texto)
+    if not m:
+        return ""
+    return m.group(1).upper()
+
+
+def extrair_animal_de_texto(texto):
+    """
+    Extrai apenas UM animal de textos bagunçados.
+    Entrada aceita:
+      NOME - SBB / PELAGEM
+      - NOME - SBB / / OUTRO ANIMAL
+      PELAGEM - NOME - SBB / PELAGEM / OUTRO ANIMAL
+      NOME - SBB / URL
+    Saída: nome, sbb, pelagem.
+    """
+    texto = limpar_campo(texto)
+    if not texto:
+        return {"nome": "", "sbb": "", "pelagem": ""}
+
+    texto = URL_RE.sub("", texto)
+    texto = texto.strip(" -/")
+
+    m = REGISTRO_RE.search(texto)
+    if not m:
+        return {"nome": "", "sbb": "", "pelagem": ""}
+
+    sbb = m.group(1).upper()
+
+    antes = texto[:m.start()].strip(" -/")
+    depois = texto[m.end():].strip()
+
+    # O nome é o último bloco antes do SBB que não seja pelagem.
+    partes_antes = [p.strip(" -/") for p in re.split(r"\s+-\s+", antes) if p.strip(" -/")]
+    nome = ""
+    for parte in reversed(partes_antes):
+        if not parece_pelagem(parte):
+            nome = parte
+            break
+    if not nome and partes_antes:
+        nome = partes_antes[-1]
+
+    # Pelagem é apenas o primeiro conteúdo depois da primeira barra.
+    pelagem = ""
+    if "/" in depois:
+        pedacos = [p.strip(" -/") for p in depois.split("/")]
+        for pedaco in pedacos:
+            if not pedaco:
+                continue
+            if URL_RE.search(pedaco):
+                continue
+            # Se já aparece outro SBB ou outro animal, não usar como pelagem.
+            if REGISTRO_RE.search(pedaco):
+                continue
+            if " - " in pedaco:
+                continue
+            pelagem = pedaco
+            break
+    else:
+        # Casos raros: "NOME - SBB PELAGEM". Só usa se parecer pelagem conhecida.
+        resto = depois.strip(" -/")
+        if parece_pelagem(resto):
+            pelagem = resto
+
+    if pelagem and not parece_pelagem(pelagem):
+        # Evita jogar nome de outro animal como pelagem.
+        pelagem = ""
+
+    return {
+        "nome": limpar_campo(nome),
+        "sbb": sbb,
+        "pelagem": limpar_campo(pelagem),
+    }
+
+
+def limpar_pelagem(valor):
+    valor = limpar_campo(valor)
+    if not valor:
+        return ""
+    if URL_RE.search(valor):
+        return ""
+    if REGISTRO_RE.search(valor):
+        return ""
+    if " - " in valor:
+        return ""
+    if valor.upper() in ["XXX", "NÃO INFORMADO", "NAO INFORMADO"]:
+        return ""
+    return valor.strip(" -/")
 
 
 def cor_por_nome(nome):
@@ -135,98 +251,85 @@ def cor_por_nome(nome):
     return "#" + h[:6]
 
 
-def extrair_primeiro_animal_do_texto(texto):
-    """
-    Lê Item_xx_TextoCompleto e tenta extrair somente o primeiro animal:
-    NOME - SBB / PELAGEM
-
-    Isso evita puxar URL ou dois animais dentro da mesma célula.
-    """
-    texto = limpar_campo_pedigree(texto)
-
-    if not texto:
-        return "", "", ""
-
-    # Padrão de SBB nacional, importado e registros estrangeiros comuns:
-    # B014477, CHD01234, UP00123, AP003985, *000532 etc.
-    padrao_sbb = r"(?:\*[0-9]{3,}|[A-Z]{1,5}[0-9]{3,})"
-
-    m = re.search(
-        rf"^\s*(.*?)\s+-\s+({padrao_sbb})\s*/\s*(.*)$",
-        texto,
-        flags=re.IGNORECASE,
-    )
-
-    if not m:
-        return "", "", ""
-
-    nome = limpar_campo_pedigree(m.group(1))
-    sbb = limpar_campo_pedigree(m.group(2))
-    pelagem = limpar_campo_pedigree(m.group(3))
-
-    # Se a pelagem veio grudada com outro animal, corta antes do próximo padrão "NOME - SBB /".
-    # Ex.: "Tordilha Tapada ACULEO NUTRIA II - CHD25321 / Alazã"
-    corte = re.search(
-        rf"\s+[A-ZÁÉÍÓÚÃÕÂÊÔÇ0-9][A-ZÁÉÍÓÚÃÕÂÊÔÇ0-9\s'\.\-]+\s+-\s+{padrao_sbb}\s*/",
-        pelagem,
-        flags=re.IGNORECASE,
-    )
-    if corte:
-        pelagem = pelagem[:corte.start()].strip()
-
-    # Segurança extra: se ainda sobrou separador de outro animal, corta.
-    if " - " in pelagem:
-        pelagem = pelagem.split(" - ")[0].strip()
-
-    return nome, sbb, pelagem
-
-
 def get_item(row, numero):
     prefixo = f"Item_{numero:02d}"
 
-    nome_col = limpar_campo_pedigree(row.get(f"{prefixo}_Nome", ""))
-    sbb_col = limpar_campo_pedigree(row.get(f"{prefixo}_SBB", ""))
-    pelagem_col = limpar_campo_pedigree(row.get(f"{prefixo}_Pelagem", ""))
-    texto_completo = limpar_campo_pedigree(row.get(f"{prefixo}_TextoCompleto", ""))
+    bruto_nome = row.get(f"{prefixo}_Nome", "")
+    bruto_sbb = row.get(f"{prefixo}_SBB", "")
+    bruto_pelagem = row.get(f"{prefixo}_Pelagem", "")
+    bruto_texto = row.get(f"{prefixo}_TextoCompleto", "")
 
-    nome_txt, sbb_txt, pelagem_txt = extrair_primeiro_animal_do_texto(texto_completo)
+    # Primeiro tenta interpretar os campos que podem vir completos/bagunçados.
+    candidatos_parse = [
+        extrair_animal_de_texto(bruto_texto),
+        extrair_animal_de_texto(bruto_sbb),
+        extrair_animal_de_texto(bruto_nome),
+    ]
 
-    # Prioridade: TextoCompleto para preencher campos faltantes ou corrigir sujeira.
-    nome = nome_txt or nome_col
-    sbb = sbb_txt or sbb_col
-    pelagem = pelagem_txt or pelagem_col
+    nome = limpar_campo(bruto_nome)
+    sbb = extrair_sbb(bruto_sbb)
+    pelagem = limpar_pelagem(bruto_pelagem)
 
-    # Se o nome veio grudado com registro/pelagem, corta.
-    if " - " in nome:
-        nome = nome.split(" - ")[0].strip()
-    if " / " in nome:
-        nome = nome.split(" / ")[0].strip()
+    # Se o nome veio como pelagem ou vazio, busca o nome nos textos completos.
+    if not nome or parece_pelagem(nome) or REGISTRO_RE.search(nome):
+        for cand in candidatos_parse:
+            if cand["nome"]:
+                nome = cand["nome"]
+                break
 
-    # Se a pelagem ficou longa demais ou com URL/texto estranho, limpa.
-    pelagem = limpar_campo_pedigree(pelagem)
+    # Se o campo nome veio como "NOME - SBB / PELAGEM", separa corretamente.
+    parse_nome = extrair_animal_de_texto(bruto_nome)
+    if parse_nome["nome"] and parse_nome["sbb"]:
+        nome = parse_nome["nome"]
+        if not sbb:
+            sbb = parse_nome["sbb"]
+        if not pelagem:
+            pelagem = parse_nome["pelagem"]
+
+    # SBB sempre deve ser só o registro, nunca o texto todo.
+    if not sbb:
+        for cand in candidatos_parse:
+            if cand["sbb"]:
+                sbb = cand["sbb"]
+                break
+
+    # Pelagem: usa a coluna própria; se estiver vazia, usa o texto completo.
+    if not pelagem:
+        for cand in candidatos_parse:
+            if cand["pelagem"]:
+                pelagem = cand["pelagem"]
+                break
+
+    # Segurança final: nome não pode conter URL, SBB nem outro animal grudado.
+    nome = limpar_campo(nome)
+    if " - " in nome and extrair_sbb(nome):
+        nome = extrair_animal_de_texto(nome)["nome"]
+    if "/" in nome:
+        nome = nome.split("/")[0].strip()
+    nome = nome.strip(" -/")
+
+    sbb = normalizar_sbb(sbb)
+    pelagem = limpar_pelagem(pelagem)
 
     return {
         "item": numero,
         "nome": nome,
         "sbb": sbb,
         "pelagem": pelagem,
-        "texto_completo": texto_completo,
     }
 
 
 def formatar_animal(animal):
-    nome = limpar_campo_pedigree(animal.get("nome", ""))
-    sbb = limpar_campo_pedigree(animal.get("sbb", ""))
-    pelagem = limpar_campo_pedigree(animal.get("pelagem", ""))
+    nome = limpar_campo(animal.get("nome", ""))
+    sbb = normalizar_sbb(animal.get("sbb", ""))
+    pelagem = limpar_pelagem(animal.get("pelagem", ""))
 
-    if not nome:
+    if not nome and not sbb:
         return ""
 
-    texto = nome
-
+    texto = nome if nome else "Sem nome"
     if sbb:
         texto += f" - {sbb}"
-
     if pelagem:
         texto += f" / {pelagem}"
 
@@ -284,10 +387,13 @@ def montar_mapa_pedigree(row, sufixo=""):
 
 
 def normalizar_sbb(sbb):
-    sbb = str(sbb).strip().upper()
+    sbb = limpar_campo(sbb).upper()
     if sbb in ["", "XXX", "-", "NÃO INFORMADO", "NAO INFORMADO", "NAN", "NONE"]:
         return ""
-    return sbb
+    m = REGISTRO_RE.search(sbb)
+    if not m:
+        return ""
+    return m.group(1).upper()
 
 
 def cor_por_sbb(sbb):
