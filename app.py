@@ -11,7 +11,7 @@ from bs4 import BeautifulSoup
 # CONFIGURAÇÕES
 # ==============================
 ARQUIVO_PLANILHA_PADRAO = "extracao_bruta_pedigree1.xlsx"
-ARQUIVO_HTML_BASE = "modelopadraohipotetico_espelhado.html"
+ARQUIVO_HTML_BASE = "modelopadraohipotetico.html"
 
 st.set_page_config(page_title="Cruzamento Hipotético", layout="wide")
 st.title("🐴 Sistema de Pedigree e Cruzamento Hipotético")
