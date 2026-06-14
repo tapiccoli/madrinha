@@ -3,6 +3,15 @@ import re
 import hashlib
 from collections import defaultdict
 
+try:
+    from weasyprint import HTML
+    WEASYPRINT_OK = True
+    WEASYPRINT_ERRO = ""
+except Exception as e:
+    HTML = None
+    WEASYPRINT_OK = False
+    WEASYPRINT_ERRO = str(e)
+
 import pandas as pd
 import streamlit as st
 from bs4 import BeautifulSoup
@@ -13,16 +22,9 @@ from bs4 import BeautifulSoup
 ARQUIVO_PLANILHA_PADRAO = "extracao_bruta_pedigree.xlsx"
 ARQUIVO_HTML_BASE = "modelopadraohipotetico.html"
 
-if not os.path.exists(ARQUIVO_HTML_BASE):
-    st.error(
-        f"Arquivo {ARQUIVO_HTML_BASE} não encontrado."
-    )
-    st.stop()
-
-caminho_html_base = ARQUIVO_HTML_BASE
-
 st.set_page_config(page_title="Cruzamento Hipotético", layout="wide")
 st.title("🐴 Sistema de Pedigree e Cruzamento Hipotético")
+st.caption("Modelo por placeholders Item_xx_TextoCompleto e Item_xx_TextoCompleto1")
 
 # ==============================
 # GERAÇÕES POR ITEM
@@ -422,11 +424,28 @@ def gerar_html_individual(row1, caminho_html_base):
 
     return str(soup), repetidos
 
+
+def gerar_pdf_do_html(html: str) -> bytes:
+    """Gera PDF usando exatamente o HTML que o sistema já montou."""
+    if not WEASYPRINT_OK or HTML is None:
+        raise RuntimeError(
+            "WeasyPrint não está instalado ou não carregou corretamente. "
+            f"Detalhe: {WEASYPRINT_ERRO}"
+        )
+
+    return HTML(
+        string=html,
+        base_url=os.getcwd()
+    ).write_pdf()
+
 # ==============================
 # INTERFACE
 # ==============================
 
+st.markdown("Carregue a planilha e o modelo HTML, ou deixe os arquivos na mesma pasta do app.")
+
 arquivo_planilha = st.file_uploader("Planilha padrão (.xlsx)", type=["xlsx"])
+arquivo_html = st.file_uploader("Modelo HTML", type=["html", "htm"])
 
 if arquivo_planilha is not None:
     excel = pd.ExcelFile(arquivo_planilha)
@@ -446,11 +465,16 @@ animal2_df = None
 if "animal2" in excel.sheet_names:
     animal2_df = pd.read_excel(excel, sheet_name="animal2", dtype=str)
 
-if not os.path.exists(ARQUIVO_HTML_BASE):
-    st.error(
-        f"Arquivo {ARQUIVO_HTML_BASE} não encontrado."
-    )
-    st.stop()
+if arquivo_html is not None:
+    caminho_html_temp = "_modelo_upload_temp.html"
+    with open(caminho_html_temp, "wb") as f:
+        f.write(arquivo_html.getbuffer())
+    caminho_html_base = caminho_html_temp
+else:
+    if not os.path.exists(ARQUIVO_HTML_BASE):
+        st.warning(f"Carregue o HTML ou coloque '{ARQUIVO_HTML_BASE}' na pasta do app.")
+        st.stop()
+    caminho_html_base = ARQUIVO_HTML_BASE
 
 modo = st.sidebar.radio(
     "Tipo de relatório",
@@ -481,6 +505,20 @@ if modo == "Relatório individual":
             file_name="relatorio_individual.html",
             mime="text/html"
         )
+
+        try:
+            pdf = gerar_pdf_do_html(html)
+            st.download_button(
+                "Baixar PDF do relatório individual",
+                data=pdf,
+                file_name="relatorio_individual.pdf",
+                mime="application/pdf"
+            )
+        except Exception as e:
+            st.warning(
+                "Não consegui gerar o PDF. Verifique se 'weasyprint' está no requirements.txt. "
+                f"Erro: {e}"
+            )
 
 else:
     st.subheader("Cruzamento hipotético")
@@ -515,3 +553,17 @@ else:
             file_name="cruzamento_hipotetico.html",
             mime="text/html"
         )
+
+        try:
+            pdf = gerar_pdf_do_html(html)
+            st.download_button(
+                "Baixar PDF do cruzamento",
+                data=pdf,
+                file_name="cruzamento_hipotetico.pdf",
+                mime="application/pdf"
+            )
+        except Exception as e:
+            st.warning(
+                "Não consegui gerar o PDF. Verifique se 'weasyprint' está no requirements.txt. "
+                f"Erro: {e}"
+            )
