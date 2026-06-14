@@ -23,7 +23,6 @@ caminho_html_base = ARQUIVO_HTML_BASE
 
 st.set_page_config(page_title="Cruzamento Hipotético", layout="wide")
 st.title("🐴 Sistema de Pedigree e Cruzamento Hipotético")
-st.caption("Modelo por placeholders Item_xx_TextoCompleto e Item_xx_TextoCompleto1")
 
 # ==============================
 # GERAÇÕES POR ITEM
