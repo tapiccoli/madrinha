@@ -552,8 +552,8 @@ else:
     opcoes2 = [nome_para_select(row, "1") for _, row in animal2_df.iterrows()]
 
     col1, col2 = st.columns(2)
-    escolha1 = col1.selectbox("Macho", opcoes1)
-    escolha2 = col2.selectbox("Fêmea", opcoes2)
+    escolha1 = col1.selectbox("Animal 1", opcoes1)
+    escolha2 = col2.selectbox("Animal 2", opcoes2)
 
     row1 = localizar_por_select(animal1_df, escolha1, "")
     row2 = localizar_por_select(animal2_df, escolha2, "1")
